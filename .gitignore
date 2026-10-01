@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+backend/data/savora.db
+backend/data/savora.db-*
+backend/uploads/*
+!backend/uploads/.gitkeep
