@@ -1,13 +1,14 @@
 import dns from "node:dns";
 dns.setServers(["8.8.8.8", "1.1.1.1"]);
 
-
 import express from "express";
 import cors from "cors";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import { nanoid } from "nanoid";
 import multer from "multer";
+import { v2 as cloudinary } from "cloudinary";
+import { CloudinaryStorage } from "multer-storage-cloudinary";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -34,6 +35,14 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = path.join(__dirname, "uploads");
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+// Cloudinary setup — images are stored in the cloud (permanent) instead of
+// the local uploads/ folder, which Render wipes on every redeploy.
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
 // Express 4 doesn't catch rejected promises from async handlers, so every
 // route is wrapped: any database error becomes a clean 500 instead of a hang.
@@ -72,13 +81,6 @@ app.get("/api/menu", asyncHandler(async (req, res) => {
 }));
 
 // --- Staff auth (multiple roles, real accounts) ---
-// Accounts live in the `staff` table (backend/staffStore.js) with bcrypt-
-// hashed passwords — not a hardcoded array. Two are seeded automatically on
-// a fresh database (see db.js), and managers can add/remove more via the
-// Staff tab. Tokens are random per-login and mapped to the account that
-// issued them (role + staffId), so a manager token can't be used to bypass
-// kitchen-only or manager-only routes and vice versa, and removing someone's
-// account can immediately revoke whatever session they're currently using.
 const activeTokens = new Map(); // token -> { role, staffId }, in-memory sessions cleared on server restart
 
 function revokeTokensForStaff(staffId) {
@@ -99,10 +101,6 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-// Chain after requireAdmin on routes only the manager role should reach
-// (revenue figures, sales analytics, menu edits, staff management) — a
-// valid kitchen token still gets rejected here, with 403 rather than 401
-// since they ARE authenticated, just not authorized for this route.
 function requireManager(req, res, next) {
   if (req.staffRole !== "manager") {
     return res.status(403).json({ error: "Manager access required" });
@@ -110,11 +108,6 @@ function requireManager(req, res, next) {
   next();
 }
 
-// The inverse boundary: actually running the kitchen (advancing an order
-// through Received → Preparing → Ready → Served) is kitchen-only. Manager
-// gets to watch the same board update live, but not operate it — keeps
-// one clear owner for "is this order actually being cooked" instead of
-// both roles being able to click the same buttons.
 function requireKitchen(req, res, next) {
   if (req.staffRole !== "kitchen") {
     return res.status(403).json({ error: "Kitchen access required" });
@@ -162,9 +155,6 @@ app.get("/api/admin/orders", requireAdmin, asyncHandler(async (req, res) => {
   res.json(await Promise.all((await listTodayOrders()).map(withCancellerInfo)));
 }));
 
-// Revenue is manager-only — kitchen staff can see order counts and prep
-// times (computed client-side from the order list they already have) but
-// not the money.
 app.get("/api/admin/stats", requireAdmin, requireManager, asyncHandler(async (req, res) => {
   res.json(await getTodayStats());
 }));
@@ -174,13 +164,17 @@ app.get("/api/admin/analytics", requireAdmin, requireManager, asyncHandler(async
 }));
 
 // --- Menu management (admin) ---
+// Images are now uploaded to Cloudinary instead of the local disk, so they
+// survive Render restarts/redeploys. Cloudinary returns a full HTTPS URL
+// in req.file.path, which is what we send back to the frontend.
 const imageUpload = multer({
-  storage: multer.diskStorage({
-    destination: UPLOADS_DIR,
-    filename: (req, file, cb) => {
-      const ext = path.extname(file.originalname).toLowerCase() || ".jpg";
-      cb(null, `${nanoid(12)}${ext}`);
-    }
+  storage: new CloudinaryStorage({
+    cloudinary,
+    params: {
+      folder: "savora/dishes",
+      allowed_formats: ["jpg", "jpeg", "png", "webp", "gif"],
+      transformation: [{ width: 800, height: 800, crop: "limit" }],
+    },
   }),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
   fileFilter: (req, file, cb) => {
@@ -194,9 +188,12 @@ app.post("/api/admin/menu/upload-image", requireAdmin, requireManager, asyncHand
     if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
       return res.status(400).json({ error: "Image must be under 5MB" });
     }
-    if (err) return res.status(400).json({ error: "Upload failed" });
+    if (err) {
+      console.error("Cloudinary upload error:", err);
+      return res.status(400).json({ error: "Upload failed" });
+    }
     if (!req.file) return res.status(400).json({ error: "Only JPEG, PNG, WEBP, or GIF images are allowed" });
-    res.json({ path: `/uploads/${req.file.filename}` });
+    res.json({ path: req.file.path });
   });
 }));
 
@@ -223,18 +220,12 @@ app.patch("/api/admin/orders/:id/status", requireAdmin, requireKitchen, asyncHan
   const { status } = req.body; // "preparing" | "ready" | "served"
   const order = await updateKitchenStatus(req.params.id, status);
   if (!order) return res.status(404).json({ error: "Order not found" });
-  io.emit("order-updated", order); // for the kitchen dashboard's live board
-  io.to(`order-${order.id}`).emit("track-update", order); // for that one customer's tracking page only
+  io.emit("order-updated", order);
+  io.to(`order-${order.id}`).emit("track-update", order);
   await broadcastStats();
   res.json(order);
 }));
 
-// Manager-only: void a paid order. This is deliberately separate from the
-// kitchen-status endpoint above and gated to the opposite role — cancelling
-// is a financial/business call (it changes revenue reporting and may need a
-// real-world refund), not a kitchen-cooking one (see store.js "cancelOrder").
-// Broadcasts the same way status updates do, so the kitchen board and the
-// customer's tracking page both reflect it live.
 app.patch("/api/admin/orders/:id/cancel", requireAdmin, requireManager, asyncHandler(async (req, res) => {
   const reason = (req.body.reason || "").trim();
   if (reason.length < 3) {
@@ -282,9 +273,6 @@ app.get("/api/orders/:id", asyncHandler(async (req, res) => {
 }));
 
 // --- Customer order tracking (public, no login) ---
-// Looked up by an unguessable random token (not the sequential order id) so a
-// tracking link a customer shares or bookmarks can't be used to enumerate or
-// view other customers' orders.
 app.get("/api/track/:token", asyncHandler(async (req, res) => {
   const order = await getOrderByToken(req.params.token);
   if (!order) return res.status(404).json({ error: "Order not found" });
@@ -299,7 +287,7 @@ app.post("/api/help", asyncHandler(async (req, res) => {
   }
 
   const request = await createHelpRequest({ orderType, tableNumber });
-  io.emit("new-help-request", request); // admin dashboard listens globally, regardless of active tab
+  io.emit("new-help-request", request);
   res.json(request);
 }));
 
@@ -316,15 +304,8 @@ app.patch("/api/admin/help/:id/resolve", requireAdmin, asyncHandler(async (req, 
 
 // --- Mock payments ---
 // Replace these handlers with real calls to the MTN MoMo API, Airtel Money
-// API, and a real card payment gateway (Stripe, Flutterwave, etc.). MoMo and
-// Airtel push a USSD prompt to the customer's phone and confirm success via
-// a callback/webhook — mirror that shape here: 1) kick off the request,
-// 2) return "pending" immediately, 3) the real provider calls you back, and
-// you update paymentStatus + emit "new-order". Card payments would instead
-// call the gateway's charge/confirm API and get a near-immediate result.
+// API, and a real card payment gateway (Stripe, Flutterwave, etc.).
 function mockPaymentRequest(order, res) {
-  // Simulate the customer confirming the USSD prompt (or a card gateway
-  // authorizing the charge) after ~3s.
   setTimeout(async () => {
     try {
       const updated = await updatePaymentStatus(order.id, "paid");
@@ -359,7 +340,6 @@ app.post("/api/payments/card/:orderId", asyncHandler(async (req, res) => {
 }));
 
 app.post("/api/payments/cash/:orderId", asyncHandler(async (req, res) => {
-  // Cash-at-counter: mark paid immediately, staff reconciles physically.
   const order = await updatePaymentStatus(req.params.orderId, "paid");
   if (!order) return res.status(404).json({ error: "Order not found" });
   io.emit("new-order", order);
@@ -370,9 +350,6 @@ app.post("/api/payments/cash/:orderId", asyncHandler(async (req, res) => {
 io.on("connection", (socket) => {
   console.log("Client connected:", socket.id);
 
-  // A customer's tracking page joins its own order's room so it only ever
-  // receives updates for that one order — never the full order stream the
-  // kitchen dashboard sees.
   socket.on("join-order", (orderId) => {
     socket.join(`order-${orderId}`);
   });
