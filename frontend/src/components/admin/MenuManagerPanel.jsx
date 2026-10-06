@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Plus, Pencil, Trash2, UploadCloud, Loader2 } from "lucide-react";
 import { getMenu, addDish, updateDish, deleteDish, uploadDishImage, API_BASE } from "../../api.js";
 import { formatRWF } from "../../utils.js";
+import { resolveImageUrl } from "../../api";
 
 const EMPTY_FORM = {
   categoryId: "",
@@ -24,10 +25,7 @@ function toIngredients(text) {
 // Uploaded images come back as a relative path like "/uploads/abc123.jpg" —
 // resolve it against the backend's own origin so <img> tags load correctly
 // (the frontend and backend run on different ports in dev).
-function resolveImageUrl(image) {
-  if (!image) return image;
-  return image.startsWith("/uploads/") ? `${API_BASE}${image}` : image;
-}
+
 
 export default function MenuManagerPanel() {
   const [menu, setMenu] = useState([]);
