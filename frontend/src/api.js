@@ -6,6 +6,11 @@ const ADMIN_ROLE_KEY = "savora_admin_role";
 
 export const api = axios.create({ baseURL: BASE_URL });
 export const API_BASE = BASE_URL;
+export const resolveImageUrl = (image) => {
+  if (!image) return image;
+  if (image.startsWith("http://") || image.startsWith("https://")) return image;
+  return `${API_BASE}${image}`;
+};
 
 // Attach the admin session token to every request automatically — the
 // backend only checks it on /api/admin/* routes, so this is harmless on

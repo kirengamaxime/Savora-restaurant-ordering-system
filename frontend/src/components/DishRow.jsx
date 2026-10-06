@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import { resolveImageUrl } from "../api";
 import { formatRWF } from "../utils.js";
 import { useLanguage } from "../context/LanguageContext.jsx";
 
@@ -11,7 +12,7 @@ export default function DishRow({ dish }) {
       className={`dish-row ${dish.soldOut ? "sold-out" : ""}`}
       onClick={() => !dish.soldOut && navigate(`/dish/${dish.id}`)}
     >
-      <img className="dish-row-img" src={dish.image} alt={dish.name} />
+      <img className="dish-row-img" src={resolveImageUrl(dish.image)} alt={dish.name} />
       <div className="dish-row-body">
         <p className="dish-row-name">{dish.name}</p>
         <p className="dish-row-desc">{dish.description}</p>

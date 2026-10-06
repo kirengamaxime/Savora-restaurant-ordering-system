@@ -1,3 +1,4 @@
+import { resolveImageUrl } from "../api";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
@@ -72,7 +73,7 @@ export default function DishDetail() {
   return (
     <div className="screen">
       <Navbar />
-      <img className="dish-hero-img" src={dish.image} alt={dish.name} />
+      <img className="dish-hero-img" src={resolveImageUrl(dish.image)} alt={dish.name} />
 
       <div className="container" style={{ paddingTop: 20 }}>
         <button className="back-link" onClick={() => navigate(-1)}>
