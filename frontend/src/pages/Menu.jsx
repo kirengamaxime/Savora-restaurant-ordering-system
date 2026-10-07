@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import DishSkeleton from "../components/DishSkeleton.jsx";
 import { useNavigate } from "react-router-dom";
 import { Search } from "lucide-react";
 import { getMenu } from "../api.js";
@@ -18,21 +19,24 @@ export default function Menu() {
   const [menu, setMenu] = useState([]);
   const [activeCategory, setActiveCategory] = useState(null);
   const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(true);
   const { orderType, tableNumber, setTableNumber } = useCart();
   const { t } = useLanguage();
   const navigate = useNavigate();
   useIdleReset();
 
   useEffect(() => {
-    if (!orderType) {
-      navigate("/");
-      return;
-    }
-    getMenu().then((data) => {
+  if (!orderType) {
+    navigate("/");
+    return;
+  }
+  getMenu()
+    .then((data) => {
       setMenu(data);
       setActiveCategory(data[0]?.id);
-    });
-  }, [orderType]); // eslint-disable-line react-hooks/exhaustive-deps
+    })
+    .finally(() => setLoading(false));
+}, [orderType]); // eslint-disable-line react-hooks/exhaustive-deps // eslint-disable-line react-hooks/exhaustive-deps
 
   const category = menu.find((c) => c.id === activeCategory);
 
@@ -95,18 +99,18 @@ export default function Menu() {
             ))}
           </div>
 
-          <div className="container">
-            <div className="dish-grid">
-              {visibleDishes.map((dish) => (
-                <DishRow key={dish.id} dish={dish} />
-              ))}
-            </div>
-            {visibleDishes.length === 0 && (
-              <p style={{ textAlign: "center", color: "rgba(251,247,238,0.5)", marginTop: 40 }}>
-                {t("menu.noMatch", { query })}
-              </p>
-            )}
-          </div>
+         <div className="container">
+  <div className="dish-grid">
+    {loading
+      ? Array.from({ length: 4 }).map((_, i) => <DishSkeleton key={i} />)
+      : visibleDishes.map((dish) => <DishRow key={dish.id} dish={dish} />)}
+  </div>
+  {!loading && visibleDishes.length === 0 && (
+    <p style={{ textAlign: "center", color: "rgba(251,247,238,0.5)", marginTop: 40 }}>
+      {t("menu.noMatch", { query })}
+    </p>
+  )}
+</div>
 
           <CartBar />
         </>

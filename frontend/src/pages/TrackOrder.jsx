@@ -1,3 +1,4 @@
+import TrackSkeleton from "../components/TrackSkeleton.jsx";
 import { useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { io } from "socket.io-client";
@@ -58,7 +59,13 @@ function TrackOrderInner() {
     );
   }
 
-  if (!order) return null;
+  if (!order) {
+  return (
+    <div className="screen">
+      <TrackSkeleton />
+    </div>
+  );
+}
 
   const isCancelled = order.kitchenStatus === "cancelled";
   const pickupLabel = order.orderType === "dine-in" ? t("track.served") : t("track.pickedUp");
