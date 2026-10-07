@@ -78,8 +78,10 @@ export default function MenuManagerPanel() {
     setUploadError("");
     setUploading(true);
     try {
-      const { path: uploadedPath } = await uploadDishImage(file);
-      setForm((prev) => ({ ...prev, image: `${API_BASE}${uploadedPath}` }));
+            const { path: uploadedPath } = await uploadDishImage(file);
+      // uploadedPath is already a full Cloudinary URL, so store it as-is.
+      // resolveImageUrl (used when rendering) leaves absolute URLs untouched.
+      setForm((prev) => ({ ...prev, image: uploadedPath }));
     } catch (err) {
       setUploadError(err.response?.data?.error || "Upload failed — try a smaller JPEG/PNG/WEBP file.");
     } finally {
