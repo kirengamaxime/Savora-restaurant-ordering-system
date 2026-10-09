@@ -7,6 +7,7 @@ import { API_BASE, getOrderByToken } from "../api.js";
 import { formatRWF } from "../utils.js";
 import OrderProgress from "../components/OrderProgress.jsx";
 import { LanguageProvider, useLanguage } from "../context/LanguageContext.jsx";
+import ReceiptModal from "../components/ReceiptModal.jsx";
 
 const LANGUAGES = ["EN", "KN", "FR"];
 
@@ -15,6 +16,7 @@ function TrackOrderInner() {
   const { language, setLanguage, t } = useLanguage();
   const [order, setOrder] = useState(null);
   const [notFound, setNotFound] = useState(false);
+  const [showReceipt, setShowReceipt] = useState(false);
   const socketRef = useRef(null);
 
   useEffect(() => {
@@ -60,12 +62,12 @@ function TrackOrderInner() {
   }
 
   if (!order) {
-  return (
-    <div className="screen">
-      <TrackSkeleton />
-    </div>
-  );
-}
+    return (
+      <div className="screen">
+        <TrackSkeleton />
+      </div>
+    );
+  }
 
   const isCancelled = order.kitchenStatus === "cancelled";
   const pickupLabel = order.orderType === "dine-in" ? t("track.served") : t("track.pickedUp");
@@ -120,10 +122,35 @@ function TrackOrderInner() {
           <p style={{ fontWeight: 700, marginTop: 10, marginBottom: 0 }}>{formatRWF(order.total)}</p>
         </div>
 
+        {order.paymentStatus === "paid" && !isCancelled && (
+          <button
+            onClick={() => setShowReceipt(true)}
+            style={{
+              width: "100%",
+              marginTop: 16,
+              padding: "14px 16px",
+              background: "var(--accent)",
+              color: "#fff",
+              border: "none",
+              borderRadius: 10,
+              fontWeight: 700,
+              fontSize: 14,
+              letterSpacing: 0.5,
+              cursor: "pointer",
+            }}
+          >
+            🧾 SHOW RECEIPT
+          </button>
+        )}
+
         <p style={{ textAlign: "center", fontSize: 12.5, color: "rgba(251,247,238,0.4)", marginTop: 20 }}>
           {t("track.closeNote")}
         </p>
       </div>
+
+      {showReceipt && (
+        <ReceiptModal order={order} onClose={() => setShowReceipt(false)} />
+      )}
     </div>
   );
 }
